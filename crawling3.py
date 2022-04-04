@@ -7,8 +7,11 @@ need_reviews_cnt = 500
 reviews = []
 review_data=[]
 
-#page를 1부터 1씩 증가하며 URL을 다음 페이지로 바꿈 
-for page in range(1,500):
+#page를 1부터 1씩 증가하며 URL을 다음 페이지로 바꿈
+#page 1 2 3 4 버튼을 클릭하면 url이 변하는 형식이 아니라 1페이지 리뷰 20개가 반복됨. 
+#제목과 내용별로 줄 나눠서 표현하려했는데 실패함.
+#.csv파일을 열려고 하니 파일에 문제가 생겨서 open불가. vscode에서만 확인가능 
+for page in range(1,5):
     url = f'https://search.shopping.naver.com/catalog/30819376142?NaPm=ct%3Dl1k0fb0w%7Cci%3D54ea254aa34b5942102782dd0b7bf430722a9887%7Ctr%3Dslcc%7Csn%3D95694%7Chk%3Dce78eab6e96197231466bf0aeada943a2a2a8b0f'
     #get : request로 url의  html문서의 내용 요청
     html = requests.get(url)
