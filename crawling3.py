@@ -8,7 +8,7 @@ reviews = []
 review_data=[]
 
 #page를 1부터 1씩 증가하며 URL을 다음 페이지로 바꿈 
-for page in range(1,100):
+for page in range(1,500):
     url = f'https://search.shopping.naver.com/catalog/30819376142?NaPm=ct%3Dl1k0fb0w%7Cci%3D54ea254aa34b5942102782dd0b7bf430722a9887%7Ctr%3Dslcc%7Csn%3D95694%7Chk%3Dce78eab6e96197231466bf0aeada943a2a2a8b0f'
     #get : request로 url의  html문서의 내용 요청
     html = requests.get(url)
@@ -19,12 +19,12 @@ for page in range(1,100):
     
     #한 페이지의 리뷰 리스트의 리뷰를 하나씩 보면서 데이터 추출
     for review in reviews:
-        sentence = review.find("p",{"class":"reviewItems_text__XIsTc"}).get("onclick").split("', '")[2]
-        #만약 리뷰 내용이 비어있다면 데이터를 사용하지 않음
+        sentence = review.find("em",{"class":"reviewItems_title__39Z8H"}).get("onclick")#.split("', '")[2]
+        #Line22에서 NoneType object has no attribute 'split' 오류발생... 왜...?
         if sentence != "":
             reviewTitle = review.find("em",{"class":"reviewItems_title__39Z8H"}).get_text()
-            Texts = review.find("p").get_text()
-            review_data.append([reviewTitle,sentence,int(Texts)])
+            Texts = review.find("p",{"class":"reviewItems_text__XIsTc"}).get_text()
+            review_data.append([reviewTitle,sentence,Texts])
             need_reviews_cnt-= 1
     #현재까지 수집된 리뷰가 목표 수집 리뷰보다 많아진 경우 크롤링 중지        
     if need_reviews_cnt < 0:                                         
