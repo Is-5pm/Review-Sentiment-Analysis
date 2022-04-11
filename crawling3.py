@@ -35,7 +35,7 @@ for page in range(1,5):
     #다음 페이지를 조회하기 전 0.5초 시간 차를 두기
     time.sleep(0.5)
      
-columns_name = ["reviewTitle","sentence","Texts"]
+columns_name = ["review"]
 with open ( "samples4.csv", "w", newline ="",encoding = 'utf8' ) as f:
     write = csv.writer(f)
     write.writerow(columns_name)
