@@ -1,7 +1,9 @@
 import torch
 import numpy as np
 import pandas as pd
+import random
 
+import torch.backends.cudnn as cudnn
 from transformers import BertTokenizer
 from transformers import BertForSequenceClassification
 from keras.preprocessing.sequence import pad_sequences
@@ -32,7 +34,7 @@ tokenized = [tokenizer.tokenize(i) for i in sentence]
 input = [tokenizer.convert_tokens_to_ids(i) for i in tokenized]
 
 # 문장을 max_len 길이에 맞게 자르고 모자란 부분은 0으로 채움
-input = pad_sequences(input, maxlen = 50, dtype = "long", truncating = "post", padding = "post")
+input = pad_sequences(input, maxlen = 128, dtype = "long", truncating = "post", padding = "post")
 
 # Attention mask 생성
 # 패딩에 해당하는 부분은 0으로 패딩이 아닌 부분은 1로 간주하는 마스크 생성
@@ -44,17 +46,18 @@ for se in input:
     attention_masks.append(seq_mask)
 
 # 데이터를 텐서로 변환
-# train 비율과 validation의 비율이 9대 1
+# train 비율과 validation의 비율이 8대 2
 train_inputs, validation_inputs, train_labels, validation_labels = train_test_split(input,
                                                                                     labels, 
-                                                                                    random_state=0, 
-                                                                                    test_size=0.1)
+                                                                                    random_state=0,
+                                                                                    stratify = labels, 
+                                                                                    test_size=0.2)
 
 # 어텐션 마스크를 훈련셋과 검증셋으로 분리
 train_masks, validation_masks, _, _ = train_test_split(attention_masks, 
                                                        input,
                                                        random_state=0, 
-                                                       test_size=0.1)
+                                                       test_size=0.2)
 
 # 데이터를 파이토치의 텐서로 변환
 train_inputs = torch.tensor(train_inputs)
@@ -134,13 +137,23 @@ model.cuda()
 optimizer = torch.optim.AdamW(model.parameters(), lr = 2e-5)
 
 epochs = 5
+va = []
+tr = []
+
+torch.manual_seed(1)
+torch.cuda.manual_seed(1)
+torch.cuda.manual_seed_all(1)
+np.random.seed(1)
+cudnn.benchmark = False
+cudnn.deterministic = True
+random.seed(1)
 
 # 학습
 for i in range(epochs):
   cost = 0
   model.train()
   print("train")
-  print( i, " / ", epochs)
+  print( i+1, " / ", epochs)
 
   #데이터로더에서 배치만큼 가져옴
   for step, batch in enumerate(train_dataloader):
@@ -150,14 +163,14 @@ for i in range(epochs):
     loss = result[0]
     cost +=loss.item()
     loss.backward()
-
     optimizer.step()
     model.zero_grad()
-    train_cost = cost / len(train_dataloader)
 
     if step % 100 == 0:
         print("batch: ", step, "/ ", len(train_dataloader) )
-        print("cost", train_cost)
+        print("cost", loss.item())
+  print("Average train cost: ", cost / len(train_dataloader))
+  tr.append(round(cost/len(train_dataloader), 2))
 
   #validation
   model.eval()
@@ -170,10 +183,13 @@ for i in range(epochs):
       
     with torch.no_grad():
       output = model(b_input_ids, token_type_ids=None, attention_mask = b_input_mask)
+      
+      # train 할 때는 output으로 loss와 logit이 나오지만 validation은 logit만 나오게 됨.
       logits = output[0]
       logits = logits.detach().cpu().numpy()
       label_ids = b_labels.to('cpu').numpy()
 
+      # 정확도 계산
       pred_flat = np.argmax(logits, axis=1).flatten()
       labels_flat = label_ids.flatten()
       tmp_eval_accuracy = np.sum(pred_flat == labels_flat) / len(labels_flat)
@@ -181,6 +197,7 @@ for i in range(epochs):
 
       nb_eval_steps += 1
   print("Validation Accuracy: {0:.2f}".format(eval_accuracy/nb_eval_steps))
+  va.append(round(eval_accuracy/nb_eval_steps, 2))
 
 
 # test
@@ -188,45 +205,81 @@ for i in range(epochs):
 model.eval()
 eval_loss, eval_accuracy = 0, 0
 nb_eval_steps, nb_eval_examples = 0, 0
-pro, con = 0, 0
+TP, TN, FP, FN = 0, 0, 0, 0
+y_pred = []
+y_true = []
+y_pred_proba = []
 
 # 데이터로더에서 배치만큼 반복하여 가져옴
 for step, batch in enumerate(test_dataloader):
-    # 배치를 GPU에 넣음
     batch = tuple(t.to(device) for t in batch)
-    
-    # 배치에서 데이터 추출
     b_input_ids, b_input_mask, b_labels = batch
-    
-    # 그래디언트 계산 안함
     with torch.no_grad():     
         # Forward 수행
         outputs = model(b_input_ids, 
                         token_type_ids=None, 
                         attention_mask=b_input_mask)
     
-    # 로스 구함
     logits = outputs[0]
-
-    # CPU로 데이터 이동
     logits = logits.detach().cpu().numpy()
     label_ids = b_labels.to('cpu').numpy()
 
-    #정확도 계산
+    # 정확도 계산
     pred_flat = np.argmax(logits, axis=1).flatten()
     labels_flat = label_ids.flatten()
     
     for i in range(len(pred_flat)):
+      y_pred.append(pred_flat[i])
+      y_true.append(labels_flat[i])
       if (pred_flat[i] == labels_flat[i]):
         if (pred_flat[i] == 1):
-          pro += 1
+          TP += 1
         else:
-          con += 1
+          TN += 1
+      else:
+        if(pred_flat[i] == 1):
+          FP += 1
+        else:
+          FN += 1
     
     tmp_eval_accuracy = np.sum(pred_flat == labels_flat) / len(labels_flat)
     eval_accuracy += tmp_eval_accuracy
     nb_eval_steps += 1
 
-print("Accuracy: {0:.2f}".format(eval_accuracy/nb_eval_steps))
-print("긍정으로 판단: ", pro)
-print("부정으로 판단: ", con)
+print("Test Accuracy: {0:.2f}".format(eval_accuracy/nb_eval_steps))
+print("True Positive: ", TP)
+print("True Negative: ", TN)
+print("False Positive: ", FP)
+print("False Negative", FN,"\n")
+
+#그래프
+from sklearn.metrics import roc_curve, classification_report, roc_auc_score, auc
+import matplotlib.pyplot as plt
+
+#average train cost 그래프, validation accuracy 그래프
+x = [1,2,3,4,5]
+plt.plot(x,tr,'-o', label = 'average train cost')
+plt.plot(x,va,'-o', label = 'validation accuracy')
+for i in range(len(x)):
+    plt.text(x[i], tr[i], tr[i])
+    plt.text(x[i], va[i], va[i])
+plt.legend()
+plt.savefig('graph.png')
+plt.show()
+
+plt.clf()
+
+#ROC curve
+print(classification_report(y_true, y_pred))
+fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+print("AUC:{0:.2f}".format(auc(fpr,tpr)))
+plt.scatter(fpr, tpr)
+plt.plot(fpr,tpr)
+plt.title("ROC curve")
+plt.savefig('roc curve.png')
+plt.show()
+
+#confusion matrix
+import scikitplot as skplt
+skplt.metrics.plot_confusion_matrix(y_true, y_pred)
+plt.savefig('cf.png')
